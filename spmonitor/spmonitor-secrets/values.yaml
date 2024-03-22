@@ -1,0 +1,8 @@
+grafana:
+  credentials:
+    adminUser: "admin"
+    adminPassword: "admin"
+minio:
+  credentials:
+    rootUser: "admin"
+    rootPassword: "adminpassword"

@@ -1,0 +1,5 @@
+pvcName:
+s3:
+  endpoint:
+  bucket_name:
+  existingSecret:

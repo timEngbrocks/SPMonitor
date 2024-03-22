@@ -1,0 +1,15 @@
+dependencies:
+- name: grafana
+  repository: https://grafana.github.io/helm-charts
+  version: 6.58.4
+- name: prometheus
+  repository: https://prometheus-community.github.io/helm-charts
+  version: 22.7.0
+- name: spmonitor-mimir
+  repository: https://timengbrocks.github.io/spmonitor-mimir
+  version: 0.1.0
+- name: minio
+  repository: https://charts.min.io/
+  version: 5.0.13
+digest: sha256:294d12419856ae083e55d50069d321bbd7acc10111d2f72230a6a2a50fd135e6
+generated: "2023-07-24T11:48:31.422655601+02:00"

@@ -1,0 +1,310 @@
+resources:
+  mimir:
+    storage:
+      capacity: 1Gi
+      hostPath:
+        path: /data/mimir-pv/
+  minio:
+    storage:
+      capacity: 1Gi
+      hostPath:
+        path: /data/minio-pv/
+
+persistency:
+  enabled: true
+
+grafana:
+  podAnnotations:
+    prometheus/scrape: "true"
+    prometheus/scheme: "http"
+    prometheus/path: "/metrics"
+    prometheus/port: "3000"
+  rbac:
+    create: true
+    pspEnabled: false
+    pspUseAppArmor: false
+    namespaced: true 
+  datasources:
+    datasources.yaml:
+      datasources:
+      - name: Prometheus
+        type: prometheus
+        url: http://spmonitor-prometheus-server.default.svc.cluster.local
+        isDefault: true
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  deploymentStrategy:
+    type: Recreate
+  ingress:
+    enabled: false
+  persistence:
+    enabled: false
+  admin:
+    existingSecret: "grafana-admin"
+    userKey: adminUser
+    passwordKey: adminPassword
+  grafana.ini:
+    server:
+      root_url: ## REDACTED ##
+    auth.generic_oauth:
+      enabled: false
+  dashboardsConfigMaps:
+    default: "grafana-dashboards"
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+      - name: 'dlaka-dashboard-provider'
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/default
+      - name: 'sp-dashboard-provider'
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/default
+
+prometheus:
+  rbac:
+    create: false
+  serviceAccounts:
+    server:
+      create: false
+      name: prometheus-rbac
+      annotations: {}
+  server:
+    podAnnotations:
+      annotations:
+      prometheus/scrape: "true"
+      prometheus/scheme: "http"
+      prometheus/path: "/metrics"
+      prometheus/port: "9090"
+    resources:
+        limits:
+          cpu: 500m
+          memory: 512Mi
+        requests:
+          cpu: 500m
+          memory: 512Mi
+    persistentVolume:
+      enabled: false
+    namespaces:
+      - default
+    ingress:
+      enabled: false
+  kube-state-metrics:
+    enabled: false
+  prometheus-pushgateway:
+    enabled: false
+  prometheus-node-exporter:
+    enabled: false
+  serverFiles:
+    prometheus.yml:
+      remote_write:
+      - url: http://spmonitor-mimir-svc.default.svc.cluster.local:9009/api/v1/push
+      rule_files:
+        - /etc/config/recording_rules.yml
+        - /etc/config/alerting_rules.yml
+      scrape_configs:
+        - job_name: kubernetes-nodes-cadvisor
+          scrape_interval: 10s
+          scrape_timeout: 10s
+          scheme: https
+          tls_config:
+            ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+          kubernetes_sd_configs:
+            - role: node
+              namespaces:
+                names:
+                - default
+                - cm
+          relabel_configs:
+            - action: labelmap
+              regex: __meta_kubernetes_node_label_(.+)
+            - target_label: __address__
+              replacement: kubernetes.default.svc:443
+            - source_labels: [__meta_kubernetes_node_name]
+              regex: (.+)
+              target_label: __metrics_path__
+              replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
+          metric_relabel_configs:
+            - action: replace
+              source_labels: [id]
+              regex: '^/machine\.slice/machine-rkt\\x2d([^\\]+)\\.+/([^/]+)\.service$'
+              target_label: rkt_container_name
+              replacement: '${2}-${1}'
+            - action: replace
+              source_labels: [id]
+              regex: '^/system\.slice/(.+)\.service$'
+              target_label: systemd_service_name
+              replacement: '${1}'
+        - job_name: spmonitor-scrape
+          scrape_interval: 30s
+          kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names:
+              - default
+              - cm
+          relabel_configs:
+          - source_labels: [__meta_kubernetes_service_annotation_prometheus_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_service_annotation_prometheus_scheme]
+            action: replace
+            target_label: __scheme__
+            regex: (http?)
+          - source_labels: [__meta_kubernetes_service_annotation_prometheus_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_service_annotation_prometheus_port]
+            action: replace
+            target_label: __address__
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_service_name]
+            action: replace
+            target_label: kubernetes_service
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: kubernetes_pod
+  alertmanager:
+    enabled: false
+    persistentVolume:
+      storageClass: shared
+
+spmonitor-mimir:
+  pvcName: mimir-pvc
+  s3:
+    endpoint: spmonitor-minio.default.svc.cluster.local:9000
+    bucket_name: prometheus
+    existingSecret: "minio-root-access"
+
+minio:
+  mode: standalone
+  drivesPerNode: 1
+  replicas: 1
+  pools: 1
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+  existingSecret: "minio-root-access"
+  buckets:
+    - name: prometheus
+      policy: none
+      purge: false
+      versioning: false
+      objectlocking: false
+  serviceAccount:
+    create: true
+    name: "minio-sa"
+  metrics:
+    serviceMonitor:
+      enabled: true
+      includeNode: true
+      public: true
+      additionalLabels: {}
+      annotations: {}
+      relabelConfigs: {}
+      relabelConfigsCluster: {}
+      namespace: ~
+      interval: 30s
+      scrapeTimeout: 10s
+  persistence:
+    enabled: true
+    annotations: {}
+    existingClaim: "minio-pvc"
+  podAnnotations:
+      prometheus/scrape: "true"
+      prometheus/scheme: "http"
+      prometheus/path: "/minio/v2/metrics/cluster"
+      prometheus/port: "9000"
+  makePolicyJob:
+    securityContext:
+      enabled: false
+      runAsUser: 1000
+      runAsGroup: 1000
+    resources:
+      requests:
+        memory: 128Mi
+    exitCommand: ""
+  makeUserJob:
+    securityContext:
+      enabled: false
+      runAsUser: 1000
+      runAsGroup: 1000
+    resources:
+      requests:
+        memory: 128Mi
+    exitCommand: ""
+  makeServiceAccountJob:
+    securityContext:
+      enabled: false
+      runAsUser: 1000
+      runAsGroup: 1000
+    resources:
+      requests:
+        memory: 128Mi
+    exitCommand: ""
+  makeBucketJob:
+    securityContext:
+      enabled: false
+      runAsUser: 1000
+      runAsGroup: 1000
+    resources:
+      requests:
+        memory: 128Mi
+    exitCommand: ""
+  customCommandJob:
+    securityContext:
+      enabled: false
+      runAsUser: 1000
+      runAsGroup: 1000
+    resources:
+      requests:
+        memory: 128Mi
+    exitCommand: ""
+  postJob:
+    podAnnotations: {}
+    annotations: {}
+    securityContext:
+      enabled: false
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+  tls:
+    enabled: false
+  ingress:
+    enabled: false
+  consoleIngress:
+    enabled: false
+  oidc:
+    enabled: false
+  networkPolicy:
+    enabled: false
+  podDisruptionBudget:
+    enabled: false

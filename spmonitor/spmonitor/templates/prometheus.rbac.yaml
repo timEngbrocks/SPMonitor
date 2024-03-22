@@ -1,0 +1,50 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  namespace: default
+  name: prometheus-scrape
+rules:
+- apiGroups:
+    - ""
+  resources:
+    - nodes
+    - nodes/proxy
+    - nodes/metrics
+    - services
+    - endpoints
+    - pods
+    - ingresses
+    - configmaps
+  verbs:
+    - get
+    - list
+    - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus-scrape
+  namespace: default
+subjects:
+  - kind: ServiceAccount
+    name: prometheus-rbac
+    namespace: default
+roleRef:
+  kind: ClusterRole 
+  name: prometheus-scrape
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus-rbac
+  namespace: default
+---
+apiVersion: v1
+kind: Secret
+type: kubernetes.io/service-account-token
+metadata:
+  name: prometheus-rbac-token
+  annotations:
+    kubernetes.io/service-account.name: prometheus-rbac
+

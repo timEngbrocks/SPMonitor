@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spmonitor-mimir
+  annotations:
+    prometheus/scrape: "true"
+    prometheus/scheme: "http"
+    prometheus/path: "/metrics"
+    prometheus/port: "8080"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mimir
+  template:
+    metadata:
+      labels:
+        app: mimir
+    spec:
+      containers:
+      - name: mimir
+        image: grafana/mimir:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+          - containerPort: 8080
+        envFrom:
+        - secretRef:
+            name: {{ .Values.s3.existingSecret }}
+        args:
+        - {{ printf "-common.storage.s3.endpoint=%s" .Values.s3.endpoint }}
+        - {{ printf "-common.storage.s3.bucket-name=%s" .Values.s3.bucket_name }}
+        - "-common.storage.backend=s3"
+        - "-common.storage.s3.insecure=true"
+        - "-common.storage.s3.access-key-id=$(rootUser)"
+        - "-common.storage.s3.secret-access-key=$(rootPassword)"
+        - "-blocks-storage.storage-prefix=blocks"
+        - "-auth.multitenancy-enabled=false"
+        - "-ingester.ring.replication-factor=1"
+        - "-alertmanager.sharding-ring.replication-factor=1"
+        - "-store-gateway.sharding-ring.replication-factor=1"
+        resources:
+          limits:
+            memory: 1Gi
+            cpu: 1000m
+          requests:
+            memory: 200Mi
+            cpu: 200m
+        volumeMounts:
+        - name: {{ .Values.pvcName }}
+          mountPath: /data/mimir-data
+      volumes:
+      - name: {{ .Values.pvcName }}
+        persistentVolumeClaim:
+            claimName: {{ .Values.pvcName }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spmonitor-mimir-svc
+  labels:
+    app: mimir
+spec:
+  ports:
+  - port: 9009
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    app: mimir
